@@ -1,0 +1,149 @@
+[
+  {
+    "component_id": "CACHE_CLUSTER_01",
+    "component_type": "CACHE",
+    "severity": "MEDIUM",
+    "message": "Redis cache miss rate exceeded 80% threshold",
+    "payload": {
+      "miss_rate": 0.83,
+      "hit_rate": 0.17,
+      "evicted_keys": 45231,
+      "memory_usage_mb": 1980,
+      "threshold_mb": 2048
+    }
+  },
+  {
+    "component_id": "CACHE_CLUSTER_01",
+    "component_type": "CACHE",
+    "severity": "MEDIUM",
+    "message": "Cache eviction rate spiking — memory pressure detected",
+    "payload": {
+      "evictions_per_sec": 1200,
+      "max_memory_policy": "allkeys-lru"
+    }
+  },
+  {
+    "component_id": "POSTGRES_PRIMARY",
+    "component_type": "RDBMS",
+    "severity": "CRITICAL",
+    "message": "Primary PostgreSQL node connection pool exhausted",
+    "payload": {
+      "active_connections": 500,
+      "max_connections": 500,
+      "waiting_queries": 87,
+      "longest_wait_ms": 12500,
+      "host": "pg-primary.internal"
+    }
+  },
+  {
+    "component_id": "POSTGRES_PRIMARY",
+    "component_type": "RDBMS",
+    "severity": "CRITICAL",
+    "message": "Replication lag exceeded 30 seconds on replica",
+    "payload": {
+      "lag_seconds": 42,
+      "replica_host": "pg-replica-01.internal",
+      "wal_sender_state": "streaming"
+    }
+  },
+  {
+    "component_id": "API_GATEWAY",
+    "component_type": "API",
+    "severity": "HIGH",
+    "message": "p99 latency exceeded 2000ms SLA",
+    "payload": {
+      "p50_ms": 120,
+      "p95_ms": 980,
+      "p99_ms": 2340,
+      "endpoint": "/api/v1/orders",
+      "rps": 4500,
+      "error_rate_pct": 3.2
+    }
+  },
+  {
+    "component_id": "API_GATEWAY",
+    "component_type": "API",
+    "severity": "HIGH",
+    "message": "5xx error rate spike — upstream dependency timeout",
+    "payload": {
+      "http_500_count": 1230,
+      "http_502_count": 87,
+      "http_504_count": 340,
+      "window_seconds": 60
+    }
+  },
+  {
+    "component_id": "MCP_HOST_PRIMARY",
+    "component_type": "MCP_HOST",
+    "severity": "CRITICAL",
+    "message": "MCP host CPU saturation — scheduling delays detected",
+    "payload": {
+      "cpu_pct": 98.4,
+      "load_avg_1m": 24.7,
+      "load_avg_5m": 22.1,
+      "runnable_threads": 312,
+      "host": "mcp-host-01.internal"
+    }
+  },
+  {
+    "component_id": "ASYNC_QUEUE_ORDERS",
+    "component_type": "ASYNC_QUEUE",
+    "severity": "HIGH",
+    "message": "Order processing queue depth critical — consumers lagging",
+    "payload": {
+      "queue_depth": 98420,
+      "consumer_count": 8,
+      "messages_per_sec_in": 4200,
+      "messages_per_sec_out": 890,
+      "oldest_message_age_sec": 3720
+    }
+  },
+  {
+    "component_id": "NOSQL_CLUSTER_01",
+    "component_type": "NOSQL",
+    "severity": "MEDIUM",
+    "message": "MongoDB replica set election triggered — brief write unavailability",
+    "payload": {
+      "election_reason": "heartbeat_timeout",
+      "previous_primary": "mongo-01.internal",
+      "new_primary": "mongo-02.internal",
+      "downtime_ms": 8200
+    }
+  },
+  {
+    "component_id": "CACHE_CLUSTER_02",
+    "component_type": "CACHE",
+    "severity": "MEDIUM",
+    "message": "Secondary cache node unreachable — failover in progress",
+    "payload": {
+      "node": "redis-secondary-02.internal",
+      "last_ping_ms": 30000,
+      "failover_status": "in_progress"
+    }
+  },
+  {
+    "component_id": "POSTGRES_REPLICA_01",
+    "component_type": "RDBMS",
+    "severity": "HIGH",
+    "message": "Disk I/O wait exceeding 70% — query performance degraded",
+    "payload": {
+      "io_wait_pct": 73.2,
+      "slow_queries_last_1m": 234,
+      "disk_throughput_mbps": 1.2,
+      "disk_max_mbps": 400
+    }
+  },
+  {
+    "component_id": "API_GATEWAY",
+    "component_type": "API",
+    "severity": "HIGH",
+    "message": "Authentication service circuit breaker OPEN",
+    "payload": {
+      "circuit": "auth-service",
+      "failure_count": 50,
+      "failure_threshold": 50,
+      "state": "OPEN",
+      "retry_after_seconds": 30
+    }
+  }
+]

@@ -3,147 +3,178 @@
     "component_id": "CACHE_CLUSTER_01",
     "component_type": "CACHE",
     "severity": "MEDIUM",
-    "message": "Redis cache miss rate exceeded 80% threshold",
+    "message": "Redis cache miss rate has crossed the 80% threshold for the checkout path. Application nodes are falling back to PostgreSQL for product, cart, and pricing lookups, increasing database pressure and user-facing p99 latency.",
     "payload": {
       "miss_rate": 0.83,
       "hit_rate": 0.17,
       "evicted_keys": 45231,
       "memory_usage_mb": 1980,
-      "threshold_mb": 2048
+      "threshold_mb": 2048,
+      "affected_routes": ["/checkout", "/cart", "/pricing"],
+      "suspected_cause": "memory_pressure",
+      "runbook": "cache/redis-memory-pressure.md"
     }
   },
   {
     "component_id": "CACHE_CLUSTER_01",
     "component_type": "CACHE",
     "severity": "MEDIUM",
-    "message": "Cache eviction rate spiking — memory pressure detected",
+    "message": "Cache eviction rate is spiking and hot keys are rotating out of memory faster than they can be refreshed. Downstream API latency is expected to degrade until memory pressure is relieved or the eviction policy is tuned.",
     "payload": {
       "evictions_per_sec": 1200,
-      "max_memory_policy": "allkeys-lru"
+      "max_memory_policy": "allkeys-lru",
+      "hot_key_sample": ["tenant:8421:catalog", "tenant:8421:discounts"],
+      "node": "redis-primary-01.internal",
+      "runbook": "cache/hot-key-eviction.md"
     }
   },
   {
     "component_id": "POSTGRES_PRIMARY",
     "component_type": "RDBMS",
     "severity": "CRITICAL",
-    "message": "Primary PostgreSQL node connection pool exhausted",
+    "message": "Primary PostgreSQL connection pool is exhausted. New writes are queueing behind long-running transactions and several API workers are timing out while waiting for a database connection.",
     "payload": {
       "active_connections": 500,
       "max_connections": 500,
       "waiting_queries": 87,
       "longest_wait_ms": 12500,
-      "host": "pg-primary.internal"
+      "host": "pg-primary.internal",
+      "blocked_tables": ["orders", "payments", "inventory_reservations"],
+      "suspected_cause": "transaction_leak",
+      "runbook": "database/postgres-pool-exhaustion.md"
     }
   },
   {
     "component_id": "POSTGRES_PRIMARY",
     "component_type": "RDBMS",
     "severity": "CRITICAL",
-    "message": "Replication lag exceeded 30 seconds on replica",
+    "message": "Replication lag has exceeded the 30 second threshold. Read replicas are serving stale data and failover safety is reduced while WAL replay remains delayed.",
     "payload": {
       "lag_seconds": 42,
       "replica_host": "pg-replica-01.internal",
-      "wal_sender_state": "streaming"
+      "wal_sender_state": "streaming",
+      "write_tps": 1420,
+      "oldest_unreplayed_wal": "00000001000000A9000000FE",
+      "runbook": "database/postgres-replication-lag.md"
     }
   },
   {
     "component_id": "API_GATEWAY",
     "component_type": "API",
     "severity": "HIGH",
-    "message": "p99 latency exceeded 2000ms SLA",
+    "message": "API gateway p99 latency has exceeded the 2000ms SLA for customer-facing traffic. The spike is concentrated around order creation and authentication fan-out calls.",
     "payload": {
       "p50_ms": 120,
       "p95_ms": 980,
       "p99_ms": 2340,
       "endpoint": "/api/v1/orders",
       "rps": 4500,
-      "error_rate_pct": 3.2
+      "error_rate_pct": 3.2,
+      "top_upstream_waits": ["auth-service", "pricing-service"],
+      "runbook": "api/gateway-latency-spike.md"
     }
   },
   {
     "component_id": "API_GATEWAY",
     "component_type": "API",
     "severity": "HIGH",
-    "message": "5xx error rate spike — upstream dependency timeout",
+    "message": "5xx error rate is rising because upstream dependency calls are timing out. Gateway retries are amplifying load, and the circuit breaker is close to opening for multiple routes.",
     "payload": {
       "http_500_count": 1230,
       "http_502_count": 87,
       "http_504_count": 340,
-      "window_seconds": 60
+      "window_seconds": 60,
+      "retry_attempts_per_request": 3,
+      "upstream": "auth-service",
+      "runbook": "api/upstream-timeout.md"
     }
   },
   {
     "component_id": "MCP_HOST_PRIMARY",
     "component_type": "MCP_HOST",
     "severity": "CRITICAL",
-    "message": "MCP host CPU saturation — scheduling delays detected",
+    "message": "Primary MCP host CPU is saturated and tool scheduling delays are breaching the execution deadline. Active sessions may experience stalled tool calls and cascading timeout retries.",
     "payload": {
       "cpu_pct": 98.4,
       "load_avg_1m": 24.7,
       "load_avg_5m": 22.1,
       "runnable_threads": 312,
-      "host": "mcp-host-01.internal"
+      "host": "mcp-host-01.internal",
+      "active_sessions": 1870,
+      "scheduler_delay_ms": 4100,
+      "runbook": "mcp/host-saturation.md"
     }
   },
   {
     "component_id": "ASYNC_QUEUE_ORDERS",
     "component_type": "ASYNC_QUEUE",
     "severity": "HIGH",
-    "message": "Order processing queue depth critical — consumers lagging",
+    "message": "Order processing queue depth is critical and consumers are falling behind. Payment confirmation and inventory reservation messages are aging past the operational threshold.",
     "payload": {
       "queue_depth": 98420,
       "consumer_count": 8,
       "messages_per_sec_in": 4200,
       "messages_per_sec_out": 890,
-      "oldest_message_age_sec": 3720
+      "oldest_message_age_sec": 3720,
+      "poison_message_rate_pct": 1.7,
+      "runbook": "queues/order-backlog.md"
     }
   },
   {
     "component_id": "NOSQL_CLUSTER_01",
     "component_type": "NOSQL",
     "severity": "MEDIUM",
-    "message": "MongoDB replica set election triggered — brief write unavailability",
+    "message": "MongoDB replica set election was triggered after heartbeat timeouts. The write path recovered, but clients observed a short write unavailability window and should be checked for retry exhaustion.",
     "payload": {
       "election_reason": "heartbeat_timeout",
       "previous_primary": "mongo-01.internal",
       "new_primary": "mongo-02.internal",
-      "downtime_ms": 8200
+      "downtime_ms": 8200,
+      "write_retries": 312,
+      "runbook": "nosql/mongo-election.md"
     }
   },
   {
     "component_id": "CACHE_CLUSTER_02",
     "component_type": "CACHE",
     "severity": "MEDIUM",
-    "message": "Secondary cache node unreachable — failover in progress",
+    "message": "Secondary cache node is unreachable and failover is in progress. The primary is absorbing all traffic and memory headroom is shrinking during replica replacement.",
     "payload": {
       "node": "redis-secondary-02.internal",
       "last_ping_ms": 30000,
-      "failover_status": "in_progress"
+      "failover_status": "in_progress",
+      "primary_memory_pct": 91.5,
+      "replication_offset_gap": 1840021,
+      "runbook": "cache/redis-failover.md"
     }
   },
   {
     "component_id": "POSTGRES_REPLICA_01",
     "component_type": "RDBMS",
     "severity": "HIGH",
-    "message": "Disk I/O wait exceeding 70% — query performance degraded",
+    "message": "Replica disk I/O wait is exceeding 70% and read query performance is degraded. Dashboard and reporting workloads are competing with replication replay for disk bandwidth.",
     "payload": {
       "io_wait_pct": 73.2,
       "slow_queries_last_1m": 234,
       "disk_throughput_mbps": 1.2,
-      "disk_max_mbps": 400
+      "disk_max_mbps": 400,
+      "top_query_fingerprint": "select orders by tenant and created_at",
+      "runbook": "database/postgres-io-wait.md"
     }
   },
   {
     "component_id": "API_GATEWAY",
     "component_type": "API",
     "severity": "HIGH",
-    "message": "Authentication service circuit breaker OPEN",
+    "message": "Authentication service circuit breaker is open at the gateway. Login, token refresh, and privileged API routes are being rejected until the half-open probe succeeds.",
     "payload": {
       "circuit": "auth-service",
       "failure_count": 50,
       "failure_threshold": 50,
       "state": "OPEN",
-      "retry_after_seconds": 30
+      "retry_after_seconds": 30,
+      "affected_routes": ["/login", "/token/refresh", "/admin"],
+      "runbook": "api/circuit-breaker-open.md"
     }
   }
 ]

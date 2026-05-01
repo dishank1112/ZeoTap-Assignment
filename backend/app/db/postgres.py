@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncpg
+from asyncpg import InvalidCatalogNameError
 
 from app.core.config import settings
 from app.core.logger import get_logger
@@ -54,20 +55,73 @@ CREATE INDEX IF NOT EXISTS idx_rcas_incident_id
 async def create_pg_pool() -> asyncpg.Pool:
     """Create and return the asyncpg connection pool."""
     global _pool
-    logger.info("pg_pool_creating", dsn=settings.POSTGRES_DSN.split("@")[-1])
-    _pool = await asyncpg.create_pool(
-        dsn=settings.POSTGRES_DSN,
-        min_size=5,
-        max_size=20,
-        command_timeout=30,
+    logger.info(
+        "pg_pool_creating",
+        host=settings.POSTGRES_HOST,
+        port=settings.POSTGRES_PORT,
+        database=settings.POSTGRES_DB,
+        user=settings.POSTGRES_USER,
     )
+    try:
+        _pool = await _create_pool()
+    except InvalidCatalogNameError:
+        if settings.POSTGRES_DSN:
+            raise
+        logger.warning(
+            "pg_database_missing_creating",
+            database=settings.POSTGRES_DB,
+        )
+        await ensure_database_exists()
+        _pool = await _create_pool()
     logger.info("pg_pool_created")
     return _pool
 
 
+async def _create_pool() -> asyncpg.Pool:
+    if settings.POSTGRES_DSN:
+        return await asyncpg.create_pool(
+            dsn=settings.POSTGRES_DSN,
+            min_size=5,
+            max_size=20,
+            command_timeout=30,
+        )
+    return await asyncpg.create_pool(
+        host=settings.POSTGRES_HOST,
+        port=settings.POSTGRES_PORT,
+        database=settings.POSTGRES_DB,
+        user=settings.POSTGRES_USER,
+        password=settings.POSTGRES_PASSWORD,
+        min_size=5,
+        max_size=20,
+        command_timeout=30,
+    )
+
+
+async def ensure_database_exists() -> None:
+    """Create the configured database using the default maintenance database."""
+    conn = await asyncpg.connect(
+        host=settings.POSTGRES_HOST,
+        port=settings.POSTGRES_PORT,
+        database="postgres",
+        user=settings.POSTGRES_USER,
+        password=settings.POSTGRES_PASSWORD,
+    )
+    try:
+        exists = await conn.fetchval(
+            "SELECT 1 FROM pg_database WHERE datname = $1",
+            settings.POSTGRES_DB,
+        )
+        if not exists:
+            db_name = settings.POSTGRES_DB.replace('"', '""')
+            await conn.execute(f'CREATE DATABASE "{db_name}"')
+            logger.info("pg_database_created", database=settings.POSTGRES_DB)
+    finally:
+        await conn.close()
+
+
 async def init_pg_schema(pool: asyncpg.Pool | None = None) -> None:
     """Create the MVP source-of-truth tables if they do not exist."""
-    active_pool = pool or await get_pg_pool()
+    active_pool = pool if pool is not None else await get_pg_pool()
     async with active_pool.acquire() as conn:
         await conn.execute(SCHEMA_SQL)
     logger.info("pg_schema_ready")

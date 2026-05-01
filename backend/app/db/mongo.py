@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from pymongo.errors import ServerSelectionTimeoutError
 
 from app.core.config import settings
 from app.core.logger import get_logger
@@ -23,14 +24,20 @@ async def create_mongo_client() -> AsyncIOMotorDatabase:
         serverSelectionTimeoutMS=5000,
     )
     _db = _client[settings.MONGO_DB]
-    await _client.admin.command("ping")
+    try:
+        await _client.admin.command("ping")
+    except ServerSelectionTimeoutError as exc:
+        raise RuntimeError(
+            "MongoDB is not reachable at MONGO_URI="
+            f"{settings.MONGO_URI}. Start MongoDB locally or update backend/.env."
+        ) from exc
     logger.info("mongo_connected")
     return _db
 
 
 async def init_mongo_indexes(db: AsyncIOMotorDatabase | None = None) -> None:
     """Create query indexes for the raw signal audit log."""
-    active_db = db or await get_mongo_db()
+    active_db = db if db is not None else await get_mongo_db()
     raw = active_db.raw_signals
     await raw.create_index([("component_id", 1), ("timestamp", -1)])
     await raw.create_index([("incident_id", 1), ("timestamp", -1)])

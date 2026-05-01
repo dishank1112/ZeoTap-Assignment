@@ -14,15 +14,37 @@ FastAPI backend for the Incident Management System MVP.
 
 ## Local Setup Without Docker
 
-1. Create PostgreSQL database:
+1. PostgreSQL:
 
    ```powershell
+   # The app can create ims_db automatically if the user has CREATEDB permission.
+   # Otherwise create it once:
    createdb -U postgres ims_db
    ```
 
-2. Start local MongoDB and Redis services using your normal Windows installation.
+2. Start local MongoDB:
 
-3. Install Python dependencies:
+   ```powershell
+   Get-Service MongoDB
+   Start-Service MongoDB
+   ```
+
+   If `MongoDB` is not a service yet, install MongoDB Community Server for Windows
+   and enable the Windows service option, or set `MONGO_URI` to a reachable MongoDB
+   instance.
+
+3. Start local Redis:
+
+   ```powershell
+   redis-server --version
+   redis-server
+   ```
+
+   If `redis-server` is not available on Windows, install Redis through Memurai,
+   WSL, or another local Redis-compatible service, then keep `REDIS_URL` pointed at
+   that service.
+
+4. Install Python dependencies:
 
    ```powershell
    cd backend
@@ -31,16 +53,21 @@ FastAPI backend for the Incident Management System MVP.
    pip install -r requirements.txt
    ```
 
-4. Check `.env` values:
+5. Check `.env` values:
 
    ```env
-   POSTGRES_DSN=postgresql://postgres:postgres@localhost:5432/ims_db
+   POSTGRES_DSN=
+   POSTGRES_HOST=localhost
+   POSTGRES_PORT=5432
+   POSTGRES_DB=ims_db
+   POSTGRES_USER=postgres
+   POSTGRES_PASSWORD=<your-password>
    MONGO_URI=mongodb://localhost:27017
    MONGO_DB=ims_raw
    REDIS_URL=redis://localhost:6379/0
    ```
 
-5. Start the API:
+6. Start the API:
 
    ```powershell
    uvicorn app.main:app --reload

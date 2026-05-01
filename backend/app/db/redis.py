@@ -1,14 +1,9 @@
-"""
-Redis async client — redis-py.
-
-Usage:
-    redis = await create_redis_client()
-    await redis.set("key", "value")
-    await close_redis_client()
-"""
+"""Redis async client."""
 from __future__ import annotations
 
 import redis.asyncio as aioredis
+from redis.exceptions import ConnectionError as RedisConnectionError
+
 from app.core.config import settings
 from app.core.logger import get_logger
 
@@ -27,8 +22,13 @@ async def create_redis_client() -> aioredis.Redis:
         decode_responses=True,
         max_connections=50,
     )
-    # Verify connection
-    await _redis.ping()
+    try:
+        await _redis.ping()
+    except RedisConnectionError as exc:
+        raise RuntimeError(
+            "Redis is not reachable at REDIS_URL="
+            f"{settings.REDIS_URL}. Start Redis locally or update backend/.env."
+        ) from exc
     logger.info("redis_connected")
     return _redis
 
@@ -44,6 +44,6 @@ async def close_redis_client() -> None:
     """Close the Redis connection."""
     global _redis
     if _redis:
-        await _redis.close()
+        await _redis.aclose()
         _redis = None
         logger.info("redis_closed")

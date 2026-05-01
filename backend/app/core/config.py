@@ -13,7 +13,12 @@ class Settings(BaseSettings):
     DEBUG: bool = True
 
     # PostgreSQL
-    POSTGRES_DSN: str = "postgresql://postgres:postgres@localhost:5432/ims_db"
+    POSTGRES_DSN: str = ""
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_DB: str = "ims_db"
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = "postgres"
 
     # MongoDB
     MONGO_URI: str = "mongodb://localhost:27017"

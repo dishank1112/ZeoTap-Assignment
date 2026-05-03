@@ -10,10 +10,15 @@ class RCASubmit(BaseModel):
     fix_applied: str = Field(..., min_length=1, max_length=4000)
     prevention_steps: str = Field(..., min_length=1, max_length=4000)
 
-    @field_validator("root_cause_category", "fix_applied", "prevention_steps")
+    @field_validator("root_cause_category", "fix_applied", "prevention_steps", mode="before")
     @classmethod
     def strip_required_text(cls, value: str) -> str:
-        return value.strip()
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("field cannot be blank")
+        return stripped
 
 
 class RCAResponse(BaseModel):

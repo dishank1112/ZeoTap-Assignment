@@ -6,6 +6,8 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
+from pymongo.errors import PyMongoError
+from redis.exceptions import RedisError
 
 from app.core.logger import get_logger
 from app.core.rate_limiter import RedisRateLimiter
@@ -72,7 +74,14 @@ def _document_to_signal(doc: dict[str, Any]) -> SignalResponse:
 
 async def _enforce_rate_limit(request: Request, amount: int) -> None:
     limiter = _get_rate_limiter(request)
-    result = await limiter.consume(_client_id(request), amount=amount)
+    try:
+        result = await limiter.consume(_client_id(request), amount=amount)
+    except RedisError as exc:
+        logger.error("rate_limiter_unavailable", error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Rate limiter is temporarily unavailable",
+        ) from exc
     if result.allowed:
         return
 
@@ -199,33 +208,47 @@ async def list_signals(
     if incident_id:
         filters["incident_id"] = incident_id
 
-    cursor = (
-        mongo.raw_signals.find(filters)
-        .sort("received_at", -1)
-        .skip(offset)
-        .limit(limit)
-    )
-    docs = await cursor.to_list(length=limit)
+    try:
+        cursor = (
+            mongo.raw_signals.find(filters)
+            .sort("received_at", -1)
+            .skip(offset)
+            .limit(limit)
+        )
+        docs = await cursor.to_list(length=limit)
+    except PyMongoError as exc:
+        logger.error("raw_signal_query_failed", error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Raw signal store is temporarily unavailable",
+        ) from exc
     return [_document_to_signal(doc) for doc in docs]
 
 
 @router.get("/stats/summary", summary="Quick stats on persisted raw signals")
 async def signal_stats():
     mongo = await get_mongo_db()
-    by_severity_cursor = mongo.raw_signals.aggregate(
-        [{"$group": {"_id": "$severity", "count": {"$sum": 1}}}]
-    )
-    by_component_cursor = mongo.raw_signals.aggregate(
-        [{"$group": {"_id": "$component_id", "count": {"$sum": 1}}}]
-    )
-    by_severity = {
-        row["_id"]: row["count"]
-        for row in await by_severity_cursor.to_list(length=None)
-    }
-    by_component = {
-        row["_id"]: row["count"]
-        for row in await by_component_cursor.to_list(length=None)
-    }
+    try:
+        by_severity_cursor = mongo.raw_signals.aggregate(
+            [{"$group": {"_id": "$severity", "count": {"$sum": 1}}}]
+        )
+        by_component_cursor = mongo.raw_signals.aggregate(
+            [{"$group": {"_id": "$component_id", "count": {"$sum": 1}}}]
+        )
+        by_severity = {
+            row["_id"]: row["count"]
+            for row in await by_severity_cursor.to_list(length=None)
+        }
+        by_component = {
+            row["_id"]: row["count"]
+            for row in await by_component_cursor.to_list(length=None)
+        }
+    except PyMongoError as exc:
+        logger.error("raw_signal_stats_failed", error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Raw signal store is temporarily unavailable",
+        ) from exc
     return {
         "total": sum(by_severity.values()),
         "by_severity": by_severity,
@@ -236,7 +259,14 @@ async def signal_stats():
 @router.get("/{signal_id}", response_model=SignalResponse, summary="Get raw signal by ID")
 async def get_signal(signal_id: str):
     mongo = await get_mongo_db()
-    doc = await mongo.raw_signals.find_one({"_id": signal_id})
+    try:
+        doc = await mongo.raw_signals.find_one({"_id": signal_id})
+    except PyMongoError as exc:
+        logger.error("raw_signal_get_failed", signal_id=signal_id, error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Raw signal store is temporarily unavailable",
+        ) from exc
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

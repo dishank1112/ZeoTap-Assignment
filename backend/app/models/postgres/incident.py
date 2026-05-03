@@ -10,6 +10,7 @@ class IncidentRecord:
     component_id: str
     component_type: str
     severity: str
+    priority: str
     status: str
     alert_type: str
     summary: str

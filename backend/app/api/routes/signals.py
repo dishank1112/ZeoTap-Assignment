@@ -1,7 +1,6 @@
 """Signal ingestion and raw-log lookup routes."""
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import uuid4
@@ -9,6 +8,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from app.core.logger import get_logger
+from app.core.rate_limiter import RedisRateLimiter
 from app.db.mongo import get_mongo_db
 from app.schemas.signal import (
     ComponentType,
@@ -18,13 +18,27 @@ from app.schemas.signal import (
     SignalIngestResponse,
     SignalResponse,
 )
+from app.services.load_balancer import SignalLoadBalancer
 
 router = APIRouter(prefix="/signals", tags=["Signals"])
 logger = get_logger("signals")
 
 
-def _get_queue(request: Request) -> asyncio.Queue:
-    return request.app.state.signal_queue
+def _get_load_balancer(request: Request) -> SignalLoadBalancer:
+    return request.app.state.signal_load_balancer
+
+
+def _get_rate_limiter(request: Request) -> RedisRateLimiter:
+    return request.app.state.rate_limiter
+
+
+def _client_id(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    if request.client:
+        return request.client.host
+    return "unknown"
 
 
 def _build_signal_response(data: SignalCreate) -> SignalResponse:
@@ -56,12 +70,30 @@ def _document_to_signal(doc: dict[str, Any]) -> SignalResponse:
     )
 
 
-async def _enqueue(queue: asyncio.Queue, signal: SignalResponse) -> bool:
-    try:
-        queue.put_nowait(signal)
-        return True
-    except asyncio.QueueFull:
-        return False
+async def _enforce_rate_limit(request: Request, amount: int) -> None:
+    limiter = _get_rate_limiter(request)
+    result = await limiter.consume(_client_id(request), amount=amount)
+    if result.allowed:
+        return
+
+    logger.warning(
+        "rate_limit_exceeded",
+        scope=result.scope,
+        limit=result.limit,
+        used=result.used,
+        amount=amount,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail={
+            "error": "Rate limit exceeded",
+            "scope": result.scope,
+            "limit": result.limit,
+            "used": result.used,
+            "retry_after_seconds": result.reset_after_seconds,
+        },
+        headers={"Retry-After": str(result.reset_after_seconds)},
+    )
 
 
 @router.post(
@@ -71,17 +103,25 @@ async def _enqueue(queue: asyncio.Queue, signal: SignalResponse) -> bool:
     summary="Ingest a single failure signal",
 )
 async def ingest_signal(payload: SignalCreate, request: Request):
-    queue = _get_queue(request)
+    await _enforce_rate_limit(request, amount=1)
+    load_balancer = _get_load_balancer(request)
     signal = _build_signal_response(payload)
 
-    accepted = await _enqueue(queue, signal)
-    if not accepted:
-        logger.warning("queue_full", component_id=signal.component_id, queue_size=queue.qsize())
+    result = load_balancer.enqueue(signal)
+    if not result.accepted:
+        logger.warning(
+            "queue_full",
+            component_id=signal.component_id,
+            shard_id=result.shard_id,
+            queue_size=result.shard_depth,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "error": "Signal buffer is full; backpressure active",
-                "queue_depth": queue.qsize(),
+                "shard_id": result.shard_id,
+                "shard_depth": result.shard_depth,
+                "queue_depth": result.total_depth,
                 "hint": "Reduce send rate or increase SIGNAL_QUEUE_MAXSIZE",
             },
         )
@@ -91,9 +131,10 @@ async def ingest_signal(payload: SignalCreate, request: Request):
         signal_id=signal.id,
         component_id=signal.component_id,
         severity=signal.severity.value,
-        queue_depth=queue.qsize(),
+        shard_id=result.shard_id,
+        queue_depth=result.total_depth,
     )
-    return SignalIngestResponse(accepted=1, queued_total=queue.qsize())
+    return SignalIngestResponse(accepted=1, queued_total=result.total_depth)
 
 
 @router.post(
@@ -103,14 +144,17 @@ async def ingest_signal(payload: SignalCreate, request: Request):
     summary="Ingest a batch of failure signals",
 )
 async def ingest_signals_batch(payload: SignalBatchCreate, request: Request):
-    queue = _get_queue(request)
+    await _enforce_rate_limit(request, amount=len(payload.signals))
+    load_balancer = _get_load_balancer(request)
     accepted = 0
     rejected = 0
+    last_total_depth = load_balancer.total_depth
 
     for raw in payload.signals:
         signal = _build_signal_response(raw)
-        ok = await _enqueue(queue, signal)
-        if ok:
+        result = load_balancer.enqueue(signal)
+        last_total_depth = result.total_depth
+        if result.accepted:
             accepted += 1
         else:
             rejected += 1
@@ -120,7 +164,7 @@ async def ingest_signals_batch(payload: SignalBatchCreate, request: Request):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "error": "All signals rejected; buffer full",
-                "queue_depth": queue.qsize(),
+                "queue_depth": load_balancer.total_depth,
             },
         )
 
@@ -128,12 +172,12 @@ async def ingest_signals_batch(payload: SignalBatchCreate, request: Request):
         "batch_accepted",
         accepted=accepted,
         rejected=rejected,
-        queue_depth=queue.qsize(),
+        queue_depth=last_total_depth,
     )
     return SignalIngestResponse(
         accepted=accepted,
         rejected=rejected,
-        queued_total=queue.qsize(),
+        queued_total=last_total_depth,
         message=f"{accepted} signals accepted, {rejected} rejected",
     )
 

@@ -8,6 +8,8 @@ FastAPI backend for the Incident Management System MVP.
 - PostgreSQL source-of-truth tables for incidents and RCA records.
 - MongoDB raw signal audit log with indexes for component, incident, severity, and time queries.
 - Redis hot-path state for debounce windows and dashboard incident snapshots.
+- Redis-backed fixed-window rate limiting for global and per-IP ingestion limits.
+- Component-affinity load balancing across shard queues for ingestion workers.
 - Debouncing by `component_id`: many signals inside the configured window map to one incident.
 - Alerting Strategy pattern for component-specific alert type and priority assignment.
 - Incident read APIs.
@@ -65,6 +67,12 @@ FastAPI backend for the Incident Management System MVP.
    MONGO_URI=mongodb://localhost:27017
    MONGO_DB=ims_raw
    REDIS_URL=redis://localhost:6379/0
+   SIGNAL_QUEUE_MAXSIZE=50000
+   SIGNAL_WORKER_CONCURRENCY=20
+   LOAD_BALANCER_SHARDS=4
+   RATE_LIMIT_GLOBAL=10000
+   RATE_LIMIT_PER_IP=1000
+   RATE_LIMIT_WINDOW_SECONDS=10
    ```
 
 6. Start the API:
@@ -97,3 +105,13 @@ python scripts\simulate_failures.py --count 1000 --rate 100 --batch
 ```
 
 Signals with the same `component_id` inside `DEBOUNCE_WINDOW_SECONDS` should create one PostgreSQL incident while every raw signal is stored in MongoDB with the same `incident_id`.
+
+## Rate Limiter And Load Balancer
+
+- `RATE_LIMIT_GLOBAL` limits total accepted signals per `RATE_LIMIT_WINDOW_SECONDS`.
+- `RATE_LIMIT_PER_IP` limits accepted signals from one client IP per window.
+- Batch ingestion consumes one token per signal, not one token per request.
+- `LOAD_BALANCER_SHARDS` creates component-affinity queues. The same `component_id`
+  always maps to the same shard, which keeps burst grouping predictable while
+  still distributing unrelated components across workers.
+- `GET /metrics` returns total queue depth plus per-shard queue depth and capacity.

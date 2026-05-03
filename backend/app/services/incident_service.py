@@ -8,7 +8,7 @@ from uuid import uuid4
 import asyncpg
 import redis.asyncio as aioredis
 
-from app.schemas.incident import IncidentResponse
+from app.schemas.incident import IncidentResponse, IncidentStatus
 from app.schemas.signal import SignalResponse
 from app.services.alerting_strategy import get_alerting_strategy
 
@@ -31,16 +31,17 @@ async def create_incident_from_signal(
         record = await conn.fetchrow(
             """
             INSERT INTO incidents (
-                id, component_id, component_type, severity, status, alert_type,
+                id, component_id, component_type, severity, priority, status, alert_type,
                 summary, signal_count, created_at, updated_at, start_time
             )
-            VALUES ($1, $2, $3, $4, 'OPEN', $5, $6, 0, $7, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, 'OPEN', $6, $7, 0, $8, $8, $9)
             RETURNING *
             """,
             incident_id,
             signal.component_id,
             signal.component_type.value,
             signal.severity.value,
+            decision.priority,
             decision.alert_type,
             decision.summary,
             now,
@@ -112,6 +113,79 @@ async def list_incidents(
             *args,
         )
     return int(total), [_record_to_incident(record) for record in records]
+
+
+ALLOWED_TRANSITIONS: dict[IncidentStatus, set[IncidentStatus]] = {
+    IncidentStatus.OPEN: {IncidentStatus.INVESTIGATING},
+    IncidentStatus.INVESTIGATING: {IncidentStatus.RESOLVED},
+    IncidentStatus.RESOLVED: {IncidentStatus.CLOSED},
+    IncidentStatus.CLOSED: set(),
+}
+
+
+async def transition_incident_status(
+    pool: asyncpg.Pool,
+    incident_id: str,
+    target_status: IncidentStatus,
+) -> IncidentResponse:
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            current = await conn.fetchrow(
+                "SELECT * FROM incidents WHERE id = $1::uuid FOR UPDATE",
+                incident_id,
+            )
+            if current is None:
+                raise LookupError(f"Incident '{incident_id}' not found")
+
+            current_status = IncidentStatus(current["status"])
+            if current_status == target_status:
+                return _record_to_incident(current)
+
+            if target_status not in ALLOWED_TRANSITIONS[current_status]:
+                raise ValueError(
+                    f"Invalid transition: {current_status.value} -> {target_status.value}"
+                )
+
+            if target_status == IncidentStatus.CLOSED:
+                has_valid_rca = await conn.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1 FROM rcas
+                        WHERE incident_id = $1::uuid AND valid = TRUE
+                    )
+                    """,
+                    incident_id,
+                )
+                if not has_valid_rca:
+                    raise ValueError("Incident cannot be closed until a valid RCA exists")
+
+            if target_status == IncidentStatus.RESOLVED:
+                record = await conn.fetchrow(
+                    """
+                    UPDATE incidents
+                    SET status = $2,
+                        updated_at = NOW(),
+                        end_time = NOW(),
+                        mttr_seconds = EXTRACT(EPOCH FROM (NOW() - start_time))
+                    WHERE id = $1::uuid
+                    RETURNING *
+                    """,
+                    incident_id,
+                    target_status.value,
+                )
+            else:
+                record = await conn.fetchrow(
+                    """
+                    UPDATE incidents
+                    SET status = $2,
+                        updated_at = NOW()
+                    WHERE id = $1::uuid
+                    RETURNING *
+                    """,
+                    incident_id,
+                    target_status.value,
+                )
+    return _record_to_incident(record)
 
 
 async def cache_incident_dashboard_state(

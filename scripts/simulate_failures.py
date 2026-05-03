@@ -61,6 +61,8 @@ async def send_one(
         resp = await client.post(f"{BASE_URL}/signals", json=signal, timeout=10.0)
         if resp.status_code == 202:
             results["ok"] += 1
+        elif resp.status_code == 429:
+            results["rate_limited"] += 1
         elif resp.status_code == 503:
             results["backpressure"] += 1
         else:
@@ -90,6 +92,8 @@ async def send_batch(
             body = resp.json()
             results["ok"] += body.get("accepted", 0)
             results["backpressure"] += body.get("rejected", 0)
+        elif resp.status_code == 429:
+            results["rate_limited"] += len(signals)
         elif resp.status_code == 503:
             results["backpressure"] += len(signals)
         else:
@@ -111,7 +115,13 @@ async def run_simulation(
     loop_forever: bool,
 ) -> None:
     templates = load_signal_templates()
-    results = {"ok": 0, "backpressure": 0, "error": 0, "connection_error": 0}
+    results = {
+        "ok": 0,
+        "rate_limited": 0,
+        "backpressure": 0,
+        "error": 0,
+        "connection_error": 0,
+    }
     sem = asyncio.Semaphore(DEFAULT_CONCURRENCY)
     batch_size = 50  # signals per batch call
 
@@ -168,6 +178,7 @@ async def run_simulation(
                 actual_rate = sent / elapsed if elapsed > 0 else 0
                 print(
                     f"  -> Sent: {sent:>6} | OK: {results['ok']:>6} | "
+                    f"RateLimited: {results['rate_limited']:>4} | "
                     f"Backpressure: {results['backpressure']:>4} | "
                     f"Rate: {actual_rate:.0f}/sec | "
                     f"Queue: {await _get_queue_depth()}"
@@ -184,6 +195,7 @@ async def run_simulation(
     print(f"  Signals sent  : {sent}")
     print(f"  Actual rate   : {sent/elapsed:.0f}/sec")
     print(f"  [OK]  Accepted     : {results['ok']}")
+    print(f"  [429] Rate limited : {results['rate_limited']}")
     print(f"  [--]  Backpressure : {results['backpressure']}")
     print(f"  [ERR] Errors       : {results['error']}")
     print(f"  [NET] Conn errors  : {results['connection_error']}")

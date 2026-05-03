@@ -31,10 +31,11 @@ class Settings(BaseSettings):
     SIGNAL_QUEUE_MAXSIZE: int = 50_000
     SIGNAL_WORKER_CONCURRENCY: int = 20
     DEBOUNCE_WINDOW_SECONDS: int = 10
+    LOAD_BALANCER_SHARDS: int = 4
 
     # Rate limiting
     RATE_LIMIT_GLOBAL: int = 10_000
-    RATE_LIMIT_PER_IP: int = 500
+    RATE_LIMIT_PER_IP: int = 1_000
     RATE_LIMIT_WINDOW_SECONDS: int = 10
 
 

@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS incidents (
     component_id VARCHAR(128) NOT NULL,
     component_type VARCHAR(64) NOT NULL,
     severity VARCHAR(32) NOT NULL,
+    priority VARCHAR(8) NOT NULL DEFAULT 'P3',
     status VARCHAR(32) NOT NULL DEFAULT 'OPEN',
     alert_type VARCHAR(64) NOT NULL,
     summary TEXT NOT NULL,
@@ -36,6 +37,9 @@ CREATE INDEX IF NOT EXISTS idx_incidents_component_status
     ON incidents (component_id, status);
 CREATE INDEX IF NOT EXISTS idx_incidents_created_at
     ON incidents (created_at DESC);
+
+ALTER TABLE incidents
+    ADD COLUMN IF NOT EXISTS priority VARCHAR(8) NOT NULL DEFAULT 'P3';
 
 CREATE TABLE IF NOT EXISTS rcas (
     id UUID PRIMARY KEY,

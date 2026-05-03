@@ -43,9 +43,25 @@ class MCPHostAlertingStrategy(AlertingStrategy):
 
 
 class APIAlertingStrategy(AlertingStrategy):
-    alert_type = "P1_API_INCIDENT"
-    priority = "P1"
     routing_key = "api-oncall"
+
+    def decide(self, signal: SignalResponse) -> AlertDecision:
+        is_latency_spike = (
+            "p99_ms" in signal.payload
+            or "latency" in signal.message.lower()
+            or "p99" in signal.message.lower()
+        )
+        priority = "P1" if is_latency_spike else "P3"
+        alert_type = "P1_API_LATENCY" if is_latency_spike else "P3_API_FAILURE"
+        return AlertDecision(
+            alert_type=alert_type,
+            priority=priority,
+            routing_key=self.routing_key,
+            summary=(
+                f"{priority} {signal.component_type.value} failure on "
+                f"{signal.component_id}: {signal.message}"
+            ),
+        )
 
 
 class QueueAlertingStrategy(AlertingStrategy):

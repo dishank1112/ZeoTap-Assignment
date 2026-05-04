@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from app.api import api_router
 from app.core.config import settings
 from app.core.logger import get_logger, setup_logger
+from app.core.metrics import MetricsCollector
 from app.core.rate_limiter import RedisRateLimiter
 from app.db.mongo import close_mongo_client, create_mongo_client, init_mongo_indexes
 from app.db.postgres import close_pg_pool, create_pg_pool, init_pg_schema
@@ -39,11 +40,18 @@ async def lifespan(app: FastAPI):
     )
     app.state.signal_load_balancer = load_balancer
     app.state.rate_limiter = RedisRateLimiter(redis)
+    app.state.metrics_collector = MetricsCollector(window_seconds=5)
     app.state.ingestion_service = IngestionService(
         mongo=mongo,
         postgres=postgres,
         redis=redis,
+        metrics=app.state.metrics_collector,
     )
+
+    metrics_task = asyncio.create_task(
+        app.state.metrics_collector.print_metrics_loop()
+    )
+    app.state.metrics_task = metrics_task
 
     workers = []
     worker_id = 0
@@ -76,9 +84,10 @@ async def lifespan(app: FastAPI):
         except asyncio.TimeoutError:
             logger.warning("drain_timeout", dropped=load_balancer.total_depth)
 
+        app.state.metrics_task.cancel()
         for worker in workers:
             worker.cancel()
-        await asyncio.gather(*workers, return_exceptions=True)
+        await asyncio.gather(*workers, app.state.metrics_task, return_exceptions=True)
 
         await close_redis_client()
         await close_mongo_client()

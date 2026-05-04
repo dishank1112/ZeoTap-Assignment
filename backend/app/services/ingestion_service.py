@@ -8,6 +8,7 @@ import redis.asyncio as aioredis
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.logger import get_logger
+from app.core.metrics import MetricsCollector
 from app.schemas.signal import SignalResponse
 from app.services.debounce_service import DebounceService
 from app.services.incident_service import (
@@ -40,10 +41,12 @@ class IngestionService:
         mongo: AsyncIOMotorDatabase,
         postgres: asyncpg.Pool,
         redis: aioredis.Redis,
+        metrics: MetricsCollector | None = None,
     ) -> None:
         self.mongo = mongo
         self.postgres = postgres
         self.redis = redis
+        self.metrics = metrics
         self.debounce = DebounceService(redis, postgres)
 
     async def process_signal(self, signal: SignalResponse) -> str:
@@ -51,6 +54,10 @@ class IngestionService:
         await self.mongo.raw_signals.insert_one(_signal_document(signal, incident_id))
         incident = await increment_incident_signal_count(self.postgres, incident_id)
         await cache_incident_dashboard_state(self.redis, incident)
+        
+        if self.metrics:
+            await self.metrics.record_processed(1)
+        
         logger.debug(
             "signal_persisted",
             signal_id=signal.id,

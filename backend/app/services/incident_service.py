@@ -106,7 +106,14 @@ async def list_incidents(
             SELECT *
             FROM incidents
             {where}
-            ORDER BY created_at DESC
+            ORDER BY 
+                CASE priority 
+                    WHEN 'P0' THEN 0
+                    WHEN 'P1' THEN 1
+                    WHEN 'P2' THEN 2
+                    ELSE 3
+                END,
+                created_at DESC
             LIMIT ${len(args) - 1}
             OFFSET ${len(args)}
             """,

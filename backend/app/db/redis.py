@@ -1,4 +1,3 @@
-"""Redis async client with optional graceful fallback."""
 from __future__ import annotations
 
 import redis.asyncio as aioredis

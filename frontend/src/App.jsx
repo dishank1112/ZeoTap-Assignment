@@ -64,7 +64,7 @@ function App() {
   const [statusFilter, setStatusFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
-  const [countdown, setCountdown] = useState(10);
+  const [countdown, setCountdown] = useState(60);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [rcaDraft, setRcaDraft] = useState({
     root_cause_category: "",
@@ -106,7 +106,7 @@ function App() {
     const refresh = () => {
       loadData()
         .then(() => {
-          if (!cancelled) setCountdown(10);
+          if (!cancelled) setCountdown(60);
         })
         .catch((error) => {
           if (!cancelled) setToast(error.message);
@@ -118,7 +118,7 @@ function App() {
       setCountdown((current) => {
         if (current <= 1) {
           refresh();
-          return 10;
+          return 60;
         }
         return current - 1;
       });
@@ -161,7 +161,7 @@ function App() {
       setSelectedIncident(updated);
       setToast(`Incident moved to ${updated.status}`);
       await loadData();
-      setCountdown(10);
+      setCountdown(60);
     } catch (error) {
       setToast(error.message);
     } finally {
@@ -234,7 +234,7 @@ function App() {
             className="icon-button"
             onClick={() => {
               loadData()
-                .then(() => setCountdown(10))
+                .then(() => setCountdown(60))
                 .catch((error) => setToast(error.message));
             }}
             title="Refresh"
@@ -270,7 +270,7 @@ function App() {
             <span>Auto-refresh</span>
             <strong>{countdown}s</strong>
             <div className="timer-track">
-              <div className="timer-fill" style={{ width: `${(countdown / 10) * 100}%` }} />
+              <div className="timer-fill" style={{ width: `${(countdown / 60) * 100}%` }} />
             </div>
           </div>
         </section>

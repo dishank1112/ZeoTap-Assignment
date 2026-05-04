@@ -667,6 +667,86 @@ textarea {
   text-align: right;
 }
 
+.rca-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+select {
+  width: 100%;
+  border: 1px solid #2a354a;
+  border-radius: 8px;
+  padding: 10px 11px;
+  color: #e5edf7;
+  background: #0e141d;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%237d8798'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-left: 8px;
+  margin-top: 16px;
+}
+
+.timeline-item {
+  position: relative;
+  padding-left: 24px;
+  padding-bottom: 24px;
+  border-left: 2px solid #263044;
+}
+
+.timeline-item:last-child {
+  border-left-color: transparent;
+  padding-bottom: 0;
+}
+
+.timeline-point {
+  position: absolute;
+  left: -7px;
+  top: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #3b82f6;
+  border: 2px solid #151b27;
+}
+
+.timeline-point.success {
+  background: #22c55e;
+}
+
+.timeline-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.timeline-time {
+  font-size: 11px;
+  color: #667085;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.timeline-label {
+  font-size: 14px;
+  color: #dce7f5;
+}
+
+.timeline-desc {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: #8f9bae;
+}
+
 @media (max-width: 1180px) {
   .sidebar {
     position: static;

@@ -3,6 +3,18 @@ import { api, rootRequest } from "./api.js";
 
 const statuses = ["OPEN", "INVESTIGATING", "RESOLVED", "CLOSED"];
 const priorities = ["P0", "P1", "P2", "P3"];
+const rcaCategories = [
+  "Software Bug",
+  "Infrastructure Failure",
+  "Network Congestion",
+  "Configuration Error",
+  "Database Lock/Slowdown",
+  "Third-party Dependency",
+  "Capacity Exhausted",
+  "Human Error",
+  "Other"
+];
+
 
 const statusAction = {
   OPEN: { label: "Start", next: "INVESTIGATING" },
@@ -42,9 +54,23 @@ function formatTime(value) {
     hour: "2-digit",
     minute: "2-digit",
     day: "2-digit",
-    month: "short"
+    month: "short",
+    second: "2-digit"
   }).format(new Date(value));
 }
+
+function toLocalISO(date) {
+  if (!date) return "";
+  try {
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return "";
+    const offset = d.getTimezoneOffset() * 60000;
+    return new Date(d.getTime() - offset).toISOString().slice(0, 16);
+  } catch (e) {
+    return "";
+  }
+}
+
 
 function secondsLabel(value) {
   if (value == null) return "Not resolved";
@@ -69,8 +95,11 @@ function App() {
   const [rcaDraft, setRcaDraft] = useState({
     root_cause_category: "",
     fix_applied: "",
-    prevention_steps: ""
+    prevention_steps: "",
+    start_time: "",
+    end_time: ""
   });
+
 
   async function loadData() {
     const params = { limit: "100" };
@@ -135,8 +164,11 @@ function App() {
     setRcaDraft({
       root_cause_category: "",
       fix_applied: "",
-      prevention_steps: ""
+      prevention_steps: "",
+      start_time: toLocalISO(incident.start_time),
+      end_time: toLocalISO(incident.end_time || new Date())
     });
+
 
     const [linkedSignals, rca] = await Promise.all([
       api.signals({ incident_id: incident.id, limit: "20" }),
@@ -148,9 +180,12 @@ function App() {
       setRcaDraft({
         root_cause_category: rca.root_cause_category,
         fix_applied: rca.fix_applied,
-        prevention_steps: rca.prevention_steps
+        prevention_steps: rca.prevention_steps,
+        start_time: toLocalISO(incident.start_time),
+        end_time: toLocalISO(incident.end_time || rca.submitted_at)
       });
     }
+
   }
 
   async function transition(incident, nextStatus) {
@@ -394,17 +429,42 @@ function IncidentDetail({ incident, signals, rca, rcaDraft, setRcaDraft, onSubmi
           <strong>RCA</strong>
           {rca?.valid && <span className="valid">Valid</span>}
         </div>
+        <div className="rca-form-grid">
+          <label>
+            Incident Start
+            <input
+              type="datetime-local"
+              value={rcaDraft.start_time}
+              onChange={(e) => setRcaDraft({ ...rcaDraft, start_time: e.target.value })}
+            />
+          </label>
+          <label>
+            Incident End
+            <input
+              type="datetime-local"
+              value={rcaDraft.end_time}
+              onChange={(e) => setRcaDraft({ ...rcaDraft, end_time: e.target.value })}
+            />
+          </label>
+        </div>
+
         <label>
-          Root cause
-          <input
+          Root cause category
+          <select
             value={rcaDraft.root_cause_category}
             onChange={(event) => setRcaDraft({ ...rcaDraft, root_cause_category: event.target.value })}
-          />
+          >
+            <option value="" disabled>Select category...</option>
+            {rcaCategories.map(cat => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
         </label>
         <label>
           Fix applied
           <textarea
             rows="3"
+            placeholder="What was done to resolve this?"
             value={rcaDraft.fix_applied}
             onChange={(event) => setRcaDraft({ ...rcaDraft, fix_applied: event.target.value })}
           />
@@ -413,6 +473,7 @@ function IncidentDetail({ incident, signals, rca, rcaDraft, setRcaDraft, onSubmi
           Prevention steps
           <textarea
             rows="3"
+            placeholder="How do we stop this from happening again?"
             value={rcaDraft.prevention_steps}
             onChange={(event) => setRcaDraft({ ...rcaDraft, prevention_steps: event.target.value })}
           />
@@ -421,6 +482,44 @@ function IncidentDetail({ incident, signals, rca, rcaDraft, setRcaDraft, onSubmi
           Save RCA
         </button>
       </section>
+
+      <section className="pane-section">
+        <div className="section-title">
+          <Icon name="refresh" />
+          <strong>Lifecycle Timeline</strong>
+        </div>
+        <div className="timeline">
+          <div className="timeline-item">
+            <div className="timeline-point"></div>
+            <div className="timeline-content">
+              <span className="timeline-time">{formatTime(incident.created_at)}</span>
+              <strong className="timeline-label">Incident Opened</strong>
+              <p className="timeline-desc">System detected anomaly in {incident.component_id}</p>
+            </div>
+          </div>
+          {incident.status !== "OPEN" && (
+            <div className="timeline-item">
+              <div className="timeline-point"></div>
+              <div className="timeline-content">
+                <span className="timeline-time">{formatTime(incident.updated_at)}</span>
+                <strong className="timeline-label">Status: {incident.status}</strong>
+                <p className="timeline-desc">Work item transitioned to {incident.status.toLowerCase()}</p>
+              </div>
+            </div>
+          )}
+          {rca && (
+            <div className="timeline-item">
+              <div className="timeline-point success"></div>
+              <div className="timeline-content">
+                <span className="timeline-time">{formatTime(rca.submitted_at)}</span>
+                <strong className="timeline-label">RCA Submitted</strong>
+                <p className="timeline-desc">Root cause identified: {rca.root_cause_category}</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
 
       <section className="pane-section">
         <div className="section-title">

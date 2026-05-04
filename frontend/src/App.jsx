@@ -64,6 +64,8 @@ function App() {
   const [statusFilter, setStatusFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
+  const [countdown, setCountdown] = useState(10);
+  const [lastUpdated, setLastUpdated] = useState(null);
   const [rcaDraft, setRcaDraft] = useState({
     root_cause_category: "",
     fix_applied: "",
@@ -73,6 +75,7 @@ function App() {
   async function loadData() {
     const params = { limit: "100" };
     if (statusFilter) params.status = statusFilter;
+    const selectedId = selectedIncident?.id;
 
     const [incidentData, signalData, statsData, metricsData] = await Promise.all([
       api.incidents(params),
@@ -81,19 +84,50 @@ function App() {
       rootRequest("/metrics")
     ]);
 
-    setIncidents(incidentData.incidents || []);
+    const nextIncidents = incidentData.incidents || [];
+    setIncidents(nextIncidents);
     setSignals(signalData || []);
     setSignalStats(statsData);
     setMetrics(metricsData);
+    setLastUpdated(new Date());
+
+    if (selectedId) {
+      const refreshedIncident = nextIncidents.find((incident) => incident.id === selectedId);
+      if (refreshedIncident) {
+        setSelectedIncident(refreshedIncident);
+      }
+      const linkedSignals = await api.signals({ incident_id: selectedId, limit: "20" });
+      setSelectedSignals(linkedSignals || []);
+    }
   }
 
   useEffect(() => {
-    loadData().catch((error) => setToast(error.message));
+    let cancelled = false;
+    const refresh = () => {
+      loadData()
+        .then(() => {
+          if (!cancelled) setCountdown(10);
+        })
+        .catch((error) => {
+          if (!cancelled) setToast(error.message);
+        });
+    };
+
+    refresh();
     const timer = setInterval(() => {
-      loadData().catch(() => {});
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [statusFilter]);
+      setCountdown((current) => {
+        if (current <= 1) {
+          refresh();
+          return 10;
+        }
+        return current - 1;
+      });
+    }, 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [statusFilter, selectedIncident?.id]);
 
   async function selectIncident(incident) {
     setSelectedIncident(incident);
@@ -127,6 +161,7 @@ function App() {
       setSelectedIncident(updated);
       setToast(`Incident moved to ${updated.status}`);
       await loadData();
+      setCountdown(10);
     } catch (error) {
       setToast(error.message);
     } finally {
@@ -165,8 +200,8 @@ function App() {
         <div className="brand">
           <span className="brand-mark">IMS</span>
           <div>
-            <strong>FailureOps</strong>
-            <span>Incident Console</span>
+            <strong>IMS</strong>
+            <span>Incident Management System</span>
           </div>
         </div>
 
@@ -180,12 +215,12 @@ function App() {
         </nav>
 
         <div className="sidebar-stat">
-          <span>Queue</span>
-          <strong>{metrics ? `${metrics.queue_depth}/${metrics.queue_capacity}` : "..."}</strong>
+          <span>Live</span>
+          <strong>{metrics ? "ONLINE" : "SYNC"}</strong>
         </div>
         <div className="sidebar-stat">
-          <span>Rate Window</span>
-          <strong>{metrics?.rate_limit_window_seconds || 10}s</strong>
+          <span>P0</span>
+          <strong>{summary.byPriority.P0 || 0}</strong>
         </div>
       </aside>
 
@@ -195,7 +230,15 @@ function App() {
             <h1>Incident Management</h1>
             <p>Signals, work items, RCA, closure.</p>
           </div>
-          <button className="icon-button" onClick={() => loadData().catch((error) => setToast(error.message))} title="Refresh">
+          <button
+            className="icon-button"
+            onClick={() => {
+              loadData()
+                .then(() => setCountdown(10))
+                .catch((error) => setToast(error.message));
+            }}
+            title="Refresh"
+          >
             <Icon name="refresh" />
           </button>
         </header>
@@ -203,18 +246,40 @@ function App() {
         {toast && <div className="toast">{toast}</div>}
 
         <section className="metric-grid">
-          {statuses.map((status) => (
-            <div className="metric" key={status}>
-              <span>{status}</span>
-              <strong>{summary.byStatus[status] || 0}</strong>
+          <div className="metric">
+            <span>Total</span>
+            <strong>{incidents.length}</strong>
+          </div>
+          <div className="metric accent-blue">
+            <span>Active</span>
+            <strong>{(summary.byStatus.OPEN || 0) + (summary.byStatus.INVESTIGATING || 0)}</strong>
+          </div>
+          <div className="metric accent-red">
+            <span>P0 Critical</span>
+            <strong>{summary.byPriority.P0 || 0}</strong>
+          </div>
+          <div className="metric accent-amber">
+            <span>P1 Warning</span>
+            <strong>{summary.byPriority.P1 || 0}</strong>
+          </div>
+          <div className="metric accent-green">
+            <span>Resolved</span>
+            <strong>{summary.byStatus.RESOLVED || 0}</strong>
+          </div>
+          <div className="metric refresh-card">
+            <span>Auto-refresh</span>
+            <strong>{countdown}s</strong>
+            <div className="timer-track">
+              <div className="timer-fill" style={{ width: `${(countdown / 10) * 100}%` }} />
             </div>
-          ))}
+          </div>
         </section>
 
         {activeView === "incidents" ? (
           <section className="workspace">
             <div className="content-area">
               <div className="toolbar">
+                <h2>Incident Feed</h2>
                 <div className="segmented">
                   <button className={!statusFilter ? "selected" : ""} onClick={() => setStatusFilter("")}>All</button>
                   {statuses.map((status) => (
@@ -262,6 +327,9 @@ function App() {
                     </div>
                   </article>
                 ))}
+              </div>
+              <div className="last-updated">
+                Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString("en-IN") : "syncing"}
               </div>
             </div>
 
@@ -363,7 +431,7 @@ function IncidentDetail({ incident, signals, rca, rcaDraft, setRcaDraft, onSubmi
           {signals.map((signal) => (
             <div key={signal.id} className="mini-signal">
               <strong>{signal.message}</strong>
-              <span>{signal.severity} · {formatTime(signal.received_at)}</span>
+              <span>{signal.severity} - {formatTime(signal.received_at)}</span>
             </div>
           ))}
         </div>

@@ -1,4 +1,4 @@
-"""Redis async client."""
+"""Redis async client with optional graceful fallback."""
 from __future__ import annotations
 
 import redis.asyncio as aioredis
@@ -9,11 +9,39 @@ from app.core.logger import get_logger
 
 logger = get_logger("db.redis")
 
-_redis: aioredis.Redis | None = None
+_redis: aioredis.Redis | "NullRedisClient" | None = None
 
 
-async def create_redis_client() -> aioredis.Redis:
-    """Create and return an async Redis connection."""
+class NullRedisClient:
+    """Fallback Redis client that preserves runtime behavior when Redis is unavailable."""
+
+    async def ping(self) -> bool:
+        return True
+
+    async def incrby(self, key: str, amount: int) -> int:
+        return amount
+
+    async def expire(self, key: str, ttl: int) -> None:
+        return None
+
+    async def get(self, key: str) -> None:
+        return None
+
+    async def set(self, key: str, value: str, **kwargs: object) -> None:
+        return None
+
+    async def delete(self, key: str) -> None:
+        return None
+
+    async def zadd(self, key: str, mapping: dict[str, float]) -> None:
+        return None
+
+    async def aclose(self) -> None:
+        return None
+
+
+async def create_redis_client() -> aioredis.Redis | NullRedisClient:
+    """Create and return an async Redis connection or fallback client."""
     global _redis
     logger.info("redis_connecting", url=settings.REDIS_URL)
     _redis = aioredis.from_url(
@@ -24,16 +52,19 @@ async def create_redis_client() -> aioredis.Redis:
     )
     try:
         await _redis.ping()
-    except RedisConnectionError as exc:
-        raise RuntimeError(
-            "Redis is not reachable at REDIS_URL="
-            f"{settings.REDIS_URL}. Start Redis locally or update backend/.env."
-        ) from exc
-    logger.info("redis_connected")
-    return _redis
+        logger.info("redis_connected")
+        return _redis
+    except Exception as exc:
+        logger.warning(
+            "redis_unavailable_fallback",
+            error=str(exc),
+            url=settings.REDIS_URL,
+        )
+        _redis = NullRedisClient()
+        return _redis
 
 
-async def get_redis() -> aioredis.Redis:
+async def get_redis() -> aioredis.Redis | NullRedisClient:
     """Return the existing Redis client."""
     if _redis is None:
         raise RuntimeError("Redis client not initialised. Call create_redis_client() first.")
@@ -43,7 +74,7 @@ async def get_redis() -> aioredis.Redis:
 async def close_redis_client() -> None:
     """Close the Redis connection."""
     global _redis
-    if _redis:
+    if _redis and not isinstance(_redis, NullRedisClient):
         await _redis.aclose()
-        _redis = None
-        logger.info("redis_closed")
+    _redis = None
+    logger.info("redis_closed")

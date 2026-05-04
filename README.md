@@ -37,8 +37,6 @@ flowchart LR
   I --> K[Frontend Dashboard]
   H --> K
   J --> K
-
-  end
 ```
 
 ### Workflow
